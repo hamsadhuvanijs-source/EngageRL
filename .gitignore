@@ -1,0 +1,17 @@
+.env
+
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/app.db
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/generated/
+
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+
+.claude/
+*.log
+tsconfig.tsbuildinfo
