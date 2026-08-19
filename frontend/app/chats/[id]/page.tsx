@@ -282,6 +282,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         <p style={{ color: "var(--accent-strong)" }}>
           Suggested for you: <strong>{MODE_LABELS[suggestion.mode]}</strong> (confidence{" "}
           {(suggestion.confidence * 100).toFixed(0)}%)
+          {suggestion.policy === "cold_start_thompson" && (
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              {" "}
+              · still exploring what works for you
+            </span>
+          )}
         </p>
       )}
 

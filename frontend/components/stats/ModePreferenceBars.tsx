@@ -18,7 +18,7 @@ export function ModePreferenceBars({ preference }: { preference: Record<Mode, Mo
     <div>
       {MODE_ORDER.map((mode) => {
         const pref = preference[mode];
-        const pct = Math.round((pref?.mean ?? 0.5) * 100);
+        const pct = Math.round((pref?.preference ?? 0.5) * 100);
         return (
           <div className="mode-pref-row" key={mode}>
             <span className="mode-pref-label">{MODE_LABELS[mode]}</span>

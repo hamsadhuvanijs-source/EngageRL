@@ -112,10 +112,19 @@ export interface ChatDetailOut {
   generations: GeneratedContentOut[];
 }
 
+export type RLPolicyName = "cold_start_thompson" | "q_learning";
+
 export interface SuggestModeOut {
   mode: Mode;
   confidence: number;
-  all_scores: Record<Mode, number>;
+  // "cold_start_thompson" for a user's first few sessions (Thompson sampling, exploring to
+  // build up real experience), "q_learning" once there's enough history for the MDP-based
+  // policy to take over as the main long-term decision-maker. See backend app/rl/policy.py.
+  policy: RLPolicyName;
+  epsilon: number | null;
+  state_key: string;
+  state: Record<string, string>;
+  action_scores: Record<Mode, number>;
 }
 
 export interface SessionOut {
@@ -158,7 +167,8 @@ export type TelemetryEventType =
   | "section_view"
   | "progress"
   | "enjoyment_feedback"
-  | "incomplete_reason";
+  | "incomplete_reason"
+  | "quiz_answer";
 
 export interface TelemetryEvent {
   event_type: TelemetryEventType;
@@ -166,9 +176,40 @@ export interface TelemetryEvent {
   client_ts: string;
 }
 
+export interface QTableEntryOut {
+  state_key: string;
+  state: Record<string, string>;
+  action: Mode;
+  q_value: number;
+  update_count: number;
+  updated_at: string;
+}
+
+export interface RLTransitionOut {
+  id: string;
+  chat_id: string;
+  session_id: string;
+  state_key: string;
+  state: Record<string, string>;
+  action: Mode;
+  reward: number;
+  next_state_key: string;
+  next_state: Record<string, string>;
+  done: boolean;
+  policy: RLPolicyName;
+  epsilon: number | null;
+  created_at: string;
+}
+
 export interface PolicyStateOut {
   user_id: string;
-  modes: Record<Mode, { alpha: number; beta: number }>;
+  active_policy: RLPolicyName;
+  epsilon: number | null;
+  completed_sessions: number;
+  cold_start_threshold: number;
+  bandit_params: Record<Mode, { alpha: number; beta: number }>;
+  q_table: QTableEntryOut[];
+  recent_transitions: RLTransitionOut[];
 }
 
 export interface EngagementPoint {
@@ -179,7 +220,10 @@ export interface EngagementPoint {
 export interface ModePreference {
   alpha: number;
   beta: number;
-  mean: number;
+  thompson_mean: number;
+  q_value_avg: number | null;
+  visit_count: number;
+  preference: number;
 }
 
 export interface TutorMessageOut {
@@ -195,6 +239,12 @@ export interface TutorReplyOut {
   assistant_message: TutorMessageOut;
 }
 
+export interface RLPolicySummary {
+  active_policy: RLPolicyName;
+  completed_sessions: number;
+  cold_start_threshold: number;
+}
+
 export interface StatsOut {
   chat_count: number;
   source_count: number;
@@ -203,4 +253,5 @@ export interface StatsOut {
   engagement_trend: EngagementPoint[];
   mode_preference: Record<Mode, ModePreference>;
   recent_chats: ChatOut[];
+  rl_policy: RLPolicySummary;
 }

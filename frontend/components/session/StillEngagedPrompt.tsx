@@ -105,7 +105,7 @@ export function StillEngagedPrompt({
   // Top modes by the bandit's real posterior mean (accumulated from actual past session
   // scores — not a fresh random draw), excluding whatever mode the user is already in.
   const alternatives = suggestion
-    ? (Object.entries(suggestion.all_scores) as [Mode, number][])
+    ? (Object.entries(suggestion.action_scores) as [Mode, number][])
         .filter(([mode]) => mode !== currentMode)
         .sort((a, b) => b[1] - a[1])
         .slice(0, NUM_ALTERNATIVES)

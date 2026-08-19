@@ -14,3 +14,4 @@ moviepy==1.0.3
 edge-tts==7.2.8
 imageio-ffmpeg==0.6.0
 Pillow==12.3.0
+pytest==8.3.4

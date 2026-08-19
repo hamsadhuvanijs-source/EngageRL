@@ -84,25 +84,48 @@ def _dwell_ratio(
     return _clamp(math.exp(-DWELL_DECAY_RATE * overage))
 
 
-def _completion_ratio(events: list[TelemetryEvent], status: str) -> float:
-    """How much of the actual content the user got through, from real per-mode progress
+def raw_progress_ratio(events: list[TelemetryEvent]) -> float | None:
+    """How far through the actual content the user got (0-1), from real per-mode progress
     telemetry (answered questions / total, cards seen / total, video seconds watched / total,
     etc — pushed by each mode's view component as the user progresses). Progress is monotonic —
     the max ratio ever reported wins, so scrolling/navigating back doesn't erase credit already
-    earned.
+    earned. Returns None (not 0.0) when the mode has no discrete-item tracking (e.g. summary) or
+    the events just aren't there — "we don't know" is a different thing from "0% done", and
+    callers (engagement scoring, RL state/reward) need to be able to tell them apart instead of
+    both collapsing to a phantom zero.
 
-    Content-item progress isn't tracked for every mode (e.g. summary has no discrete items), so
-    when there's no progress signal at all we fall back to the pre-existing status-only estimate
-    rather than assuming 0% and tanking the score for modes that were never instrumented."""
+    Exported (not prefixed `_`) because app/rl/state.py and app/rl/reward.py both need this same
+    raw signal — the MDP's progress-based state feature and terminal/mastery check must reason
+    about actual completion, not the status-blended score below."""
     ratios = [
         float((e.payload or {}).get("ratio", 0))
         for e in events
         if e.event_type == "progress" and (e.payload or {}).get("ratio") is not None
     ]
-    if not ratios:
-        return 1.0 if status == "completed" else 0.5
+    return _clamp(max(ratios)) if ratios else None
 
-    ratio = _clamp(max(ratios))
+
+def quiz_accuracy(events: list[TelemetryEvent]) -> float | None:
+    """Fraction of quiz questions answered correctly, from real per-answer "quiz_answer"
+    telemetry (pushed by QuizView as each question is answered) — not a proxy, the actual
+    correct/incorrect outcome the user saw. None if this session has no quiz answers to judge
+    (wrong mode, or no answers yet)."""
+    outcomes = [
+        bool((e.payload or {}).get("correct"))
+        for e in events
+        if e.event_type == "quiz_answer" and "correct" in (e.payload or {})
+    ]
+    return sum(outcomes) / len(outcomes) if outcomes else None
+
+
+def _completion_ratio(events: list[TelemetryEvent], status: str) -> float:
+    """The completion signal as used by the engagement score: `raw_progress_ratio` scaled down
+    for sessions that were never marked complete, or the pre-existing status-only estimate when
+    there's no progress signal at all (some modes, e.g. summary, have no discrete items to track
+    progress through) — 1.0 if the user still finished, 0.5 otherwise."""
+    ratio = raw_progress_ratio(events)
+    if ratio is None:
+        return 1.0 if status == "completed" else 0.5
     return ratio * (1.0 if status == "completed" else 0.5)
 
 

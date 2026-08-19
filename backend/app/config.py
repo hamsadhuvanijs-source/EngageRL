@@ -22,6 +22,26 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "mistral"
 
+    # --- Tabular Q-learning (app/rl/qlearning.py) ---
+    # Learning rate: how much each new transition moves Q(s,a) toward the freshly observed
+    # target. Kept low-ish since rewards are noisy (real human behavior, small per-user sample
+    # sizes) — a high alpha would make Q-values swing wildly on one unusual session.
+    rl_alpha: float = 0.15
+    # Discount factor for future reward in the Bellman target. <1 so an episode that never hits
+    # a terminal/mastery state still has a bounded, converging Q-value instead of accumulating
+    # forever.
+    rl_gamma: float = 0.9
+    # Epsilon-greedy exploration, decayed per Q-learning-phase transition (not cold-start
+    # transitions — those already explore via Thompson sampling). Starts moderate rather than at
+    # 1.0 because cold start already handled the "we know nothing" phase.
+    rl_epsilon_start: float = 0.3
+    rl_epsilon_min: float = 0.05
+    rl_epsilon_decay: float = 0.95
+    # How many completed sessions a user needs before the main policy switches from cold-start
+    # Thompson sampling to Q-learning action selection (Q-learning still learns from cold-start
+    # transitions from session 1 — this only gates which policy does the *choosing*).
+    rl_cold_start_session_threshold: int = 3
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

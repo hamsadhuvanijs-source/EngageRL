@@ -15,3 +15,6 @@ frontend/next-env.d.ts
 .claude/
 *.log
 tsconfig.tsbuildinfo
+
+backend/tests/*.db
+backend/.pytest_cache/

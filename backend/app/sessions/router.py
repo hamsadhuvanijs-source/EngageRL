@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
+from app.models.chat import Chat
 from app.models.generated_content import GeneratedContent
 from app.models.learning_session import LearningSession
 from app.models.user import User
 from app.rl.hooks import on_session_end
+from app.rl.policy import snapshot_decision
 from app.schemas.session import (
     SessionCompleteResponse,
     SessionCreateRequest,
@@ -74,7 +76,17 @@ def create_session(body: SessionCreateRequest, db: Session = Depends(get_db)) ->
         raise HTTPException(status_code=400, detail="Generated content is not ready yet")
 
     user = get_current_user(db)
+    chat = db.get(Chat, content.chat_id)
+
     session = LearningSession(user_id=user.id, generated_content_id=content.id, status="active")
+    if chat is not None:
+        # Snapshot the MDP decision context (state + action) now, before the learner has
+        # interacted with this content at all — this is the (state, action) half of the RL
+        # transition; app/rl/hooks.py::on_session_end fills in (reward, next_state, done) once
+        # the session completes. See app/rl/policy.py::snapshot_decision.
+        for key, value in snapshot_decision(db, user, chat, content.mode).items():
+            setattr(session, key, value)
+
     db.add(session)
     db.commit()
     db.refresh(session)

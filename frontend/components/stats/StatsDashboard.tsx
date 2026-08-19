@@ -38,7 +38,9 @@ export function StatsDashboard() {
       <div className="dashboard-section">
         <h2>Learning style preference</h2>
         <p className="text-muted" style={{ fontSize: 13, marginTop: -8, marginBottom: 16 }}>
-          How confident the system currently is that each mode works well for you.
+          {stats.rl_policy.active_policy === "q_learning"
+            ? `Learned from ${stats.rl_policy.completed_sessions} completed sessions — how well each format tends to work for you, given how you're doing right now.`
+            : `Still exploring (${stats.rl_policy.completed_sessions}/${stats.rl_policy.cold_start_threshold} sessions) — these will sharpen up as you complete a few more.`}
         </p>
         <ModePreferenceBars preference={stats.mode_preference} />
       </div>

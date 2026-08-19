@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.config import get_settings
 from app.generation.base import GeneratorInterface, ProgressCallback
-from app.generation.gemini_client import complete_json
+from app.generation.gemini_client import BACKGROUND_TRANSIENT_SERVER_RETRIES, complete_json
 from app.generation.json_utils import parse_json_response
 from app.generation.pollinations_image import generate_unique_image
 from app.generation.text_combine import combine_source_text
@@ -71,7 +71,7 @@ class VideoGenerator(GeneratorInterface):
         if not text.strip():
             raise ValueError("This chat has no extracted source text to generate from.")
 
-        raw = complete_json(SYSTEM_PROMPT, text)
+        raw = complete_json(SYSTEM_PROMPT, text, max_retries=BACKGROUND_TRANSIENT_SERVER_RETRIES)
         script = parse_json_response(raw)
         scenes = script.get("scenes") or []
         if not scenes:

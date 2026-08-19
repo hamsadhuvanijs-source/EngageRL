@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -19,3 +19,14 @@ class LearningSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     engagement_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active")
+
+    # Snapshot of the MDP decision context, taken at session creation (before the learner has
+    # interacted with this action at all) — see app/rl/policy.py::snapshot_decision. Nullable
+    # because sessions created before this feature shipped have none; app/rl/state.py falls
+    # back to recomputing from source data (GeneratedContent joins etc.) wherever it needs mode
+    # history, so old rows don't break state computation.
+    rl_state_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    rl_state_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    rl_action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rl_policy: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rl_epsilon: Mapped[float | None] = mapped_column(Float, nullable=True)

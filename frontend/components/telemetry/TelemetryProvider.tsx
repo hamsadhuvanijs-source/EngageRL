@@ -31,6 +31,9 @@ interface TelemetryContextValue {
   reportFeedback: (enjoying: boolean, promptedAt: "mid" | "end") => Promise<void>;
   // Explicit reason for marking a session complete before actually finishing it.
   reportIncompleteReason: (reason: string, completionRatio: number) => Promise<void>;
+  // Real per-question correctness for quiz mode — feeds the RL reward's accuracy component and
+  // the learner state's quiz_accuracy_level feature (see backend app/rl/state.py, reward.py).
+  reportQuizAnswer: (questionIndex: number, correct: boolean) => void;
 }
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
@@ -146,9 +149,21 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
     await flushNow();
   };
 
+  const reportQuizAnswer = (questionIndex: number, correct: boolean) => {
+    pushRef.current("quiz_answer", { question_index: questionIndex, correct });
+  };
+
   return (
     <TelemetryContext.Provider
-      value={{ flushNow, activeSeconds, progressRatio, reportProgress, reportFeedback, reportIncompleteReason }}
+      value={{
+        flushNow,
+        activeSeconds,
+        progressRatio,
+        reportProgress,
+        reportFeedback,
+        reportIncompleteReason,
+        reportQuizAnswer,
+      }}
     >
       {children}
     </TelemetryContext.Provider>

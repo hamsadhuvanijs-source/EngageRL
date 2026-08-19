@@ -9,7 +9,7 @@ import type { QuizContent } from "@/types/api";
 const STATE_KEY = "answers";
 
 export function QuizView({ content, contentId }: { content: QuizContent; contentId: string }) {
-  const { flushNow, reportProgress } = useTelemetry();
+  const { flushNow, reportProgress, reportQuizAnswer } = useTelemetry();
   const [answers, setAnswers] = useState<Record<number, number>>(
     () => loadContentState<Record<number, number>>(contentId, STATE_KEY) ?? {}
   );
@@ -28,6 +28,7 @@ export function QuizView({ content, contentId }: { content: QuizContent; content
       reportProgress(Object.keys(next).length / content.quiz.length);
       return next;
     });
+    reportQuizAnswer(questionIndex, optionIndex === content.quiz[questionIndex].correct_index);
     void flushNow();
   };
 
