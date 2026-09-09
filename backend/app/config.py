@@ -7,8 +7,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file="../.env", env_file_encoding="utf-8", extra="ignore")
 
     gemini_api_key: str = ""
-    # Used automatically when the primary key hits its quota (e.g. free-tier daily limit).
+    # Tried in order when an earlier key hits its quota (e.g. the free-tier daily request cap).
+    # That cap is enforced per Google Cloud *project*, so an extra key only buys real headroom
+    # when it comes from a separate project/account. GEMINI_API_KEYS is a comma-separated list
+    # for adding a third key and beyond without a new setting each time.
     gemini_api_key_backup: str = ""
+    gemini_api_keys: str = ""
     database_url: str = "sqlite:///./app.db"
     upload_dir: str = "./uploads"
     generated_dir: str = "./generated"
@@ -45,6 +49,17 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def gemini_api_key_list(self) -> list[str]:
+        """Every configured Gemini key in fallback order, de-duplicated: primary, then backup,
+        then any listed in GEMINI_API_KEYS."""
+        raw = [self.gemini_api_key, self.gemini_api_key_backup, *self.gemini_api_keys.split(",")]
+        keys: list[str] = []
+        for key in (k.strip() for k in raw):
+            if key and key not in keys:
+                keys.append(key)
+        return keys
 
 
 @lru_cache

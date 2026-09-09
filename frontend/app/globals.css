@@ -135,11 +135,13 @@ a {
 
 .chat-history-item {
   display: block;
+  flex-shrink: 0;
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   text-decoration: none;
   font-size: 14px;
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -455,6 +457,7 @@ a.source-chip:hover {
 }
 
 .mode-card {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 18px;
@@ -465,7 +468,7 @@ a.source-chip:hover {
   color: var(--text);
 }
 
-.mode-card:hover:not(:disabled) {
+.mode-card:hover:not(.busy):not([data-disabled="true"]) {
   border-color: var(--border-hover);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
@@ -476,13 +479,13 @@ a.source-chip:hover {
   box-shadow: var(--shadow-glow);
 }
 
-.mode-card:disabled,
+.mode-card.busy,
 .mode-card[data-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.mode-card:disabled:hover,
+.mode-card.busy:hover,
 .mode-card[data-disabled="true"]:hover {
   transform: none;
   box-shadow: none;
@@ -491,6 +494,91 @@ a.source-chip:hover {
 .mode-card.configuring {
   border-color: var(--accent);
   box-shadow: var(--shadow-glow);
+}
+
+/* Corner overflow menu (Regenerate / earlier versions) on configurable mode cards — kept out of
+   the card's normal flow entirely so the card itself stays as compact as a plain "Generate" card;
+   the extra actions only take up space once actually opened. */
+.mode-card-menu {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.mode-card-menu summary {
+  list-style: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mode-card-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.mode-card-menu summary:hover,
+.mode-card-menu[open] summary {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.mode-card-menu-content {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  min-width: 200px;
+  max-width: 260px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  z-index: 5;
+}
+
+.mode-card-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mode-card-menu-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.mode-card-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mode-card-menu-label {
+  padding: 8px 10px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.mode-card-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 
 .mode-config-panel {
@@ -596,6 +684,29 @@ a.source-chip:hover {
   border-radius: 999px;
   background: var(--gradient);
   transition: width 0.4s ease;
+}
+
+/* Simulated (time-estimated) progress can sit near-flat for a long stretch once the real call
+   overruns its estimate — the moving stripe keeps the bar visibly "alive" even when the fill
+   percentage itself is barely inching forward, so a slow generation doesn't read as a frozen UI. */
+.progress-bar-fill-simulated {
+  background-image: linear-gradient(
+    135deg,
+    var(--accent-strong) 25%,
+    var(--accent) 25%,
+    var(--accent) 50%,
+    var(--accent-strong) 50%,
+    var(--accent-strong) 75%,
+    var(--accent) 75%,
+    var(--accent) 100%
+  );
+  background-size: 22px 22px;
+  animation: progress-bar-shimmer 900ms linear infinite;
+}
+
+@keyframes progress-bar-shimmer {
+  from { background-position: 0 0; }
+  to { background-position: 22px 0; }
 }
 
 .progress-bar-label {
@@ -919,6 +1030,323 @@ a.source-chip:hover {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.podcast-player {
+  max-width: 720px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 24px;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 20px;
+}
+
+.podcast-hosts {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.podcast-host-badge {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.podcast-host-badge.podcast-host-active {
+  border-color: var(--host-color, var(--accent));
+  box-shadow: 0 0 0 1px var(--host-color, var(--accent)) inset;
+}
+
+.podcast-host-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: #0b0d12;
+  background: var(--host-color, var(--accent));
+}
+
+.podcast-host-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.podcast-host-badge.podcast-host-active .podcast-host-name {
+  color: var(--text);
+}
+
+.podcast-waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  flex-shrink: 0;
+  opacity: 0.35;
+}
+
+.podcast-waveform span {
+  width: 3px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--host-color, var(--accent));
+}
+
+.podcast-waveform.playing {
+  opacity: 1;
+}
+
+.podcast-waveform.playing span {
+  animation: podcast-wave 900ms ease-in-out infinite;
+}
+
+.podcast-waveform.playing span:nth-child(1) { animation-delay: 0ms; }
+.podcast-waveform.playing span:nth-child(2) { animation-delay: 150ms; }
+.podcast-waveform.playing span:nth-child(3) { animation-delay: 300ms; }
+.podcast-waveform.playing span:nth-child(4) { animation-delay: 80ms; }
+.podcast-waveform.playing span:nth-child(5) { animation-delay: 230ms; }
+
+@keyframes podcast-wave {
+  0%, 100% { height: 5px; }
+  50% { height: 20px; }
+}
+
+.podcast-caption {
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+}
+
+.podcast-caption-speaker {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.podcast-caption-text {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.5;
+  font-weight: 500;
+  animation: podcast-caption-fade 0.35s ease;
+}
+
+@keyframes podcast-caption-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.podcast-caption-placeholder {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 15px;
+}
+
+.podcast-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.podcast-transcript-toggle {
+  max-width: 720px;
+  margin-bottom: 20px;
+}
+
+.podcast-transcript-toggle summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 2px;
+  user-select: none;
+}
+
+.podcast-transcript-toggle summary:hover {
+  color: var(--text);
+}
+
+.podcast-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.podcast-line {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.podcast-line:hover {
+  border-color: var(--border-hover);
+}
+
+.podcast-line-a {
+  border-left-color: var(--accent);
+}
+
+.podcast-line-b {
+  border-left-color: var(--accent-2);
+}
+
+.podcast-line-active {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.podcast-speaker {
+  display: block;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.podcast-line p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Flowchart / mindmap (Mermaid) */
+
+.flowchart-frame {
+  position: relative;
+  max-width: 900px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.flowchart-viewport {
+  position: relative;
+  height: 520px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0) 0 0 / 22px 22px;
+}
+
+.flowchart-viewport:active {
+  cursor: grabbing;
+}
+
+.flowchart-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: center center;
+  /* No transition — pan/zoom is driven directly off pointer/wheel deltas, and easing here just
+     adds lag and overshoot on top of a fast gesture. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+
+.flowchart-svg-host {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.flowchart-svg-host svg {
+  max-width: none;
+}
+
+.flowchart-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+.flowchart-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-icon:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-hover);
+}
+
+.flowchart-source {
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: pre;
 }
 
 /* Session layout + tutor panel */

@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 
 import { ComicView } from "@/components/modes/ComicView";
 import { FlashcardsView } from "@/components/modes/FlashcardsView";
+import { FlowchartView } from "@/components/modes/FlowchartView";
+import { PodcastView } from "@/components/modes/PodcastView";
 import { QAView } from "@/components/modes/QAView";
 import { QuizView } from "@/components/modes/QuizView";
 import { SummaryView } from "@/components/modes/SummaryView";
@@ -19,6 +21,8 @@ import { loadContentState, saveContentState } from "@/lib/persistence";
 import type {
   ComicContent,
   FlashcardsContent,
+  FlowchartContent,
+  PodcastContent,
   QAContent,
   QuizContent,
   SessionCompleteResponse,
@@ -160,6 +164,12 @@ function SessionContent({ detail }: { detail: SessionDetailOut }) {
       )}
       {detail.mode === "comic" && detail.content_json && <ComicView content={detail.content_json as ComicContent} />}
       {detail.mode === "video" && detail.content_json && <VideoView content={detail.content_json as VideoContent} />}
+      {detail.mode === "podcast" && detail.content_json && (
+        <PodcastView content={detail.content_json as PodcastContent} />
+      )}
+      {detail.mode === "flowchart" && detail.content_json && (
+        <FlowchartView content={detail.content_json as FlowchartContent} />
+      )}
 
       <div style={{ marginTop: 32 }}>
         <button className="btn" onClick={onStartComplete} disabled={completing || gateStage !== "none"}>

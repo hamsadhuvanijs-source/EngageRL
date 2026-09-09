@@ -27,6 +27,18 @@ DEFAULT_ANSWER_STYLE = "long"
 # Extra time to actually look at each comic panel's artwork, on top of reading its dialogue.
 COMIC_SECONDS_PER_PANEL = 8.0
 
+# A flowchart/mindmap is studied node by node, not read straight through — text length badly
+# underestimates it (a 6-word node can encode a whole concept worth pausing on). Budget time per
+# line of Mermaid syntax, each line being roughly one node or one edge. The mode reports no
+# discrete progress (like summary), so this expected-time estimate is the main lever the dwell
+# component has for scoring a flowchart session.
+FLOWCHART_SECONDS_PER_NODE = 11.0
+
+# Podcast is listened to, not read — the flat reading_seconds chars/sec fallback assumes silent
+# reading speed, which runs faster than natural speech. ~150 wpm matches the Web Speech API's
+# default rate (see frontend PodcastView), so expected time tracks what's actually being played.
+PODCAST_WORDS_PER_SECOND = 2.5
+
 # Dwelling longer than expected isn't automatically good. Up to this multiple of the expected
 # reading time is treated as normal (careful readers, re-reading a tricky part) and still gets
 # full credit. Past that, credit only holds if interactions kept pace too — otherwise the extra
@@ -202,6 +214,18 @@ def _base_expected_seconds(content: GeneratedContent | None) -> float:
     elif content.mode == "comic":
         panel_count = len(cj.get("panels") or [])
         return max(_reading_seconds(content) + panel_count * COMIC_SECONDS_PER_PANEL, MIN_EXPECTED_SECONDS)
+
+    elif content.mode == "flowchart":
+        mermaid = cj.get("mermaid") if isinstance(cj.get("mermaid"), str) else ""
+        # Drop the header line ("flowchart TD" / "mindmap"); the rest are ~one node/edge each.
+        node_lines = [ln for ln in mermaid.splitlines()[1:] if ln.strip()]
+        if node_lines:
+            return max(len(node_lines) * FLOWCHART_SECONDS_PER_NODE, MIN_EXPECTED_SECONDS)
+
+    elif content.mode == "podcast":
+        word_count = sum(len((seg.get("text") or "").split()) for seg in (cj.get("segments") or []))
+        if word_count > 0:
+            return max(word_count / PODCAST_WORDS_PER_SECOND, MIN_EXPECTED_SECONDS)
 
     return _reading_seconds(content)
 

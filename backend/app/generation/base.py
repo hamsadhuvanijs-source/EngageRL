@@ -39,6 +39,12 @@ class TextGenerator(GeneratorInterface):
     combined source text, asked to return a JSON object matching the system prompt."""
 
     system_prompt: str
+    # Overrides gemini_client's default retry budget for this generator's call — None keeps the
+    # default (TRANSIENT_SERVER_RETRIES), appropriate for quick calls where the user is waiting
+    # on a blocking HTTP request. A generator whose own generation is already slow enough that
+    # the user expects a long wait (e.g. podcast, ~90s+) can set this higher to ride out a
+    # transient Gemini demand spike (503 UNAVAILABLE) instead of failing fast on it.
+    max_retries: int | None = None
 
     def build_system_prompt(self, options: dict | None) -> str:
         """Override to vary the prompt based on user-chosen options. Defaults to the static
@@ -56,5 +62,5 @@ class TextGenerator(GeneratorInterface):
         if not text.strip():
             raise ValueError("This chat has no extracted source text to generate from.")
 
-        raw = complete_json(self.build_system_prompt(options), text)
+        raw = complete_json(self.build_system_prompt(options), text, max_retries=self.max_retries)
         return parse_json_response(raw)

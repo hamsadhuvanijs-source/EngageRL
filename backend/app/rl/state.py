@@ -26,15 +26,15 @@ elsewhere in the app rather than inventing new ones:
   quiz_accuracy   {low, medium, high, none}                    4   rolling accuracy over recent quiz
                                                                     sessions ("none" = no quiz history
                                                                     yet to judge)
-  last_mode       {summary, quiz, flashcards, qa, comic,       7   most recent mode used *within this
-                    video, none}                                   chat/topic* (the episode) — "none"
+  last_mode       {summary, quiz, flashcards, qa, flowchart,   9   most recent mode used *within this
+                    podcast, comic, video, none}                   chat/topic* (the episode) — "none"
                                                                     if this is the first action of the
                                                                     episode
   content_length  {short, medium, long}                       3   reuses the existing (previously
                                                                     unused) app/rl/context.py bucket
                                                                     over this chat's source material
 
-Worst-case cartesian product is 3*3*3*4*7*3 = 2268 — small enough that the Q-table stays
+Worst-case cartesian product is 3*3*3*4*9*3 = 2916 — small enough that the Q-table stays
 tractable, while in practice only a tiny, sparsely-visited fraction of it is ever reached by one
 user's real session history (unvisited (state, action) pairs simply have no QState row — see
 qlearning.py).

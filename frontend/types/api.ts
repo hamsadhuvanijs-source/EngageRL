@@ -18,7 +18,20 @@ export interface QAOptions {
   answer_style: "short" | "long";
 }
 
-export type GenerateOptions = QuizFlashcardsOptions | SummaryOptions | QAOptions;
+export interface PodcastOptions {
+  length: "short" | "long";
+}
+
+export interface FlowchartOptions {
+  diagram: "flowchart" | "mindmap";
+}
+
+export type GenerateOptions =
+  | QuizFlashcardsOptions
+  | SummaryOptions
+  | QAOptions
+  | PodcastOptions
+  | FlowchartOptions;
 
 export interface ChatOut {
   id: string;
@@ -83,6 +96,28 @@ export interface VideoContent {
   scenes: VideoScene[];
 }
 
+export interface PodcastSegment {
+  speaker: string;
+  text: string;
+}
+
+export interface PodcastHost {
+  name: string;
+  gender: "female" | "male";
+}
+
+export interface PodcastContent {
+  title: string;
+  hosts: PodcastHost[];
+  segments: PodcastSegment[];
+}
+
+export interface FlowchartContent {
+  title: string;
+  diagram_type: "flowchart" | "mindmap";
+  mermaid: string;
+}
+
 export type ModeContent =
   | SummaryContent
   | QuizContent
@@ -90,6 +125,8 @@ export type ModeContent =
   | QAContent
   | ComicContent
   | VideoContent
+  | PodcastContent
+  | FlowchartContent
   | Record<string, unknown>;
 
 export interface GeneratedContentOut {

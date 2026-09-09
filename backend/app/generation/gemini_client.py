@@ -36,16 +36,16 @@ def _client_for_key(api_key: str) -> genai.Client:
 
 
 def _get_clients() -> list[genai.Client]:
-    settings = get_settings()
-    keys = [k for k in (settings.gemini_api_key, settings.gemini_api_key_backup) if k]
+    keys = get_settings().gemini_api_key_list
     if not keys:
         raise RuntimeError("GEMINI_API_KEY is not set. Add it to your .env file.")
     return [_client_for_key(k) for k in keys]
 
 
 def complete_json(system: str, user: str, max_output_tokens: int = 4000, max_retries: int | None = None) -> str:
-    """Single-turn completion, asking Gemini to return raw JSON text. Falls back to the backup
-    API key if the primary one has hit its quota (e.g. the free-tier daily request cap).
+    """Single-turn completion, asking Gemini to return raw JSON text. Falls back to the next
+    configured API key (see Settings.gemini_api_key_list) when one hits its quota (e.g. the
+    free-tier daily request cap).
 
     `max_retries` overrides TRANSIENT_SERVER_RETRIES per call site — callers that run in a
     blocking HTTP request (summary/quiz/flashcards/qa) shouldn't make the user's browser hang
