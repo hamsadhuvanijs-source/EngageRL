@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     generated_dir: str = "./generated"
     cors_origins: str = "http://localhost:3000"
 
+    # Bearer-token lifetime. None = tokens never expire (fine for a local single-machine
+    # deployment); set e.g. 30 to force re-login after 30 days.
+    auth_token_ttl_days: int | None = None
+
     # A rolling alias Google keeps pointed at their current recommended flash model — avoids
     # hard-pinning a specific version that can later get deprecated for new API keys/projects.
     gemini_model: str = "gemini-flash-latest"
@@ -45,6 +49,11 @@ class Settings(BaseSettings):
     # Thompson sampling to Q-learning action selection (Q-learning still learns from cold-start
     # transitions from session 1 — this only gates which policy does the *choosing*).
     rl_cold_start_session_threshold: int = 3
+    # Confidence-shrinkage pseudo-count (see qlearning.blended_q_values): how many observations
+    # of a (state, action) pair it takes to weigh the state-specific Q-value as much as the
+    # much-better-sampled cold-start bandit's per-mode prior. Higher = trust the sparse per-state
+    # table less / lean on the pooled per-mode prior longer before it takes over.
+    rl_shrinkage_pseudo_count: float = 3.0
 
     @property
     def cors_origin_list(self) -> list[str]:

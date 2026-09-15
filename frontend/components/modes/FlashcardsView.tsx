@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useTelemetry } from "@/components/telemetry/TelemetryProvider";
 import { loadContentState, saveContentState } from "@/lib/persistence";
 import type { FlashcardsContent } from "@/types/api";
 
 const STATE_KEY = "index";
-const MAX_INDEX_STATE_KEY = "maxIndex";
+const REVEALED_STATE_KEY = "revealed";
 
 export function FlashcardsView({ content, contentId }: { content: FlashcardsContent; contentId: string }) {
   const { flushNow, reportProgress } = useTelemetry();
@@ -16,19 +16,25 @@ export function FlashcardsView({ content, contentId }: { content: FlashcardsCont
     return saved < content.cards.length ? saved : 0;
   });
   const [flipped, setFlipped] = useState(false);
+  // Progress is "cards actually flipped to see the answer", not "cards navigated past" — a
+  // flashcard you never turn over is a flashcard you didn't use. Clicking Next without flipping
+  // earns no progress. Persisted so a resumed session keeps its earned credit.
+  const revealedRef = useRef<Set<number>>(new Set(loadContentState<number[]>(contentId, REVEALED_STATE_KEY) ?? []));
 
   const card = content.cards[index];
   const isLast = index === content.cards.length - 1;
   const isFirst = index === 0;
 
-  // Progress is "furthest card actually reached", not "current card" — going back to review
-  // an earlier card shouldn't erase credit for cards already seen.
+  const reportRevealProgress = () => {
+    reportProgress(revealedRef.current.size / content.cards.length);
+  };
+
+  // Re-emit already-earned progress on (re)mount so a resumed session doesn't look like it
+  // regressed to 0%.
   useEffect(() => {
-    const maxSeen = Math.max(loadContentState<number>(contentId, MAX_INDEX_STATE_KEY) ?? 0, index);
-    saveContentState(contentId, MAX_INDEX_STATE_KEY, maxSeen);
-    reportProgress((maxSeen + 1) / content.cards.length);
+    reportRevealProgress();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index]);
+  }, []);
 
   const goTo = (next: number) => {
     setIndex(next);
@@ -38,7 +44,16 @@ export function FlashcardsView({ content, contentId }: { content: FlashcardsCont
   };
 
   const onFlip = () => {
-    setFlipped((f) => !f);
+    setFlipped((f) => {
+      const nowFlipped = !f;
+      // Count the card the first time its answer is shown.
+      if (nowFlipped && !revealedRef.current.has(index)) {
+        revealedRef.current.add(index);
+        saveContentState(contentId, REVEALED_STATE_KEY, [...revealedRef.current]);
+        reportRevealProgress();
+      }
+      return nowFlipped;
+    });
     void flushNow();
   };
 

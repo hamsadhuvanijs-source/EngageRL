@@ -1,3 +1,4 @@
+from app.models.auth_token import AuthToken
 from app.models.bandit_state import BanditState
 from app.models.chat import Chat
 from app.models.generated_content import GeneratedContent
@@ -11,6 +12,7 @@ from app.models.user import User
 
 __all__ = [
     "User",
+    "AuthToken",
     "Chat",
     "MaterialSource",
     "GeneratedContent",

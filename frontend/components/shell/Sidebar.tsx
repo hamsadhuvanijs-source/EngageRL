@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useAuth } from "@/components/auth/AuthProvider";
 import { listChats } from "@/lib/api";
 import type { ChatOut } from "@/types/api";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, logout } = useAuth();
   const [chats, setChats] = useState<ChatOut[]>([]);
 
   useEffect(() => {
@@ -16,6 +19,11 @@ export function Sidebar() {
       .then(setChats)
       .catch(() => setChats([]));
   }, [pathname]);
+
+  async function handleLogout() {
+    await logout();
+    router.replace("/login");
+  }
 
   return (
     <aside className="sidebar">
@@ -40,6 +48,15 @@ export function Sidebar() {
           </Link>
         ))}
       </div>
+
+      {user && (
+        <div className="sidebar-user">
+          <span className="sidebar-user-email">{user.display_name || user.email}</span>
+          <button type="button" className="btn sidebar-logout-btn" onClick={handleLogout}>
+            Log out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

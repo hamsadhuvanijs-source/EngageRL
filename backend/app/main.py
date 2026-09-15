@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.auth.router import router as auth_router
 from app.chats.router import router as chats_router
 from app.config import get_settings
 from app.generation.router import router as generation_router
@@ -29,6 +30,7 @@ app.add_middleware(
 Path(settings.generated_dir).mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=settings.generated_dir), name="media")
 
+app.include_router(auth_router)
 app.include_router(chats_router)
 app.include_router(ingestion_router)
 app.include_router(generation_router)

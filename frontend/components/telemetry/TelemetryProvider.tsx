@@ -9,6 +9,10 @@ import type { TelemetryEventType } from "@/types/api";
 const SCROLL_THROTTLE_MS = 1000;
 const MOUSE_THROTTLE_MS = 2000;
 const DWELL_TICK_MS = 5000;
+// If nothing engagement-y has happened (scroll / key / click / mode progress) for this long,
+// the learner is treated as idle and "dwell" seconds stop accruing — leaving the tab open no
+// longer counts as studying. Kept generous so genuine reading/thinking pauses aren't cut off.
+const IDLE_GRACE_MS = 20000;
 
 interface TelemetryContextValue {
   flushNow: () => Promise<void>;
@@ -50,6 +54,9 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
   // session) instead of only on the fixed 5s tick — see creditDwell below.
   const creditDwellRef = useRef<() => void>(() => {});
   const pushRef = useRef<(type: TelemetryEventType, payload?: Record<string, unknown>) => void>(() => {});
+  // Timestamp of the last engagement-y signal (scroll / key / click / mouse / mode progress).
+  // creditDwell() stops accruing "dwell" seconds once this is older than IDLE_GRACE_MS.
+  const lastActivityRef = useRef<number>(Date.now());
   const [activeSeconds, setActiveSeconds] = useState(0);
   const [progressRatio, setProgressRatio] = useState<number | null>(null);
 
@@ -62,12 +69,17 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
       collector.push(makeEvent(type, payload));
     pushRef.current = push;
 
+    const markActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
     const onVisibility = () => push("visibility_change", { visible: document.visibilityState === "visible" });
     document.addEventListener("visibilitychange", onVisibility);
     push("visibility_change", { visible: document.visibilityState === "visible" });
 
     let lastScroll = 0;
     const onScroll = () => {
+      markActivity();
       const now = Date.now();
       if (now - lastScroll < SCROLL_THROTTLE_MS) return;
       lastScroll = now;
@@ -75,11 +87,15 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
     };
     window.addEventListener("scroll", onScroll, { passive: true });
 
-    const onKeydown = () => push("keypress", {});
+    const onKeydown = () => {
+      markActivity();
+      push("keypress", {});
+    };
     window.addEventListener("keydown", onKeydown);
 
     let lastMouse = 0;
     const onMouseMove = () => {
+      markActivity();
       const now = Date.now();
       if (now - lastMouse < MOUSE_THROTTLE_MS) return;
       lastMouse = now;
@@ -89,7 +105,10 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
 
     // Clicking is the primary way users interact with quiz/flashcards/Q&A — without
     // this, answering questions or flipping cards generated zero interaction signal.
-    const onClick = () => push("click", {});
+    const onClick = () => {
+      markActivity();
+      push("click", {});
+    };
     window.addEventListener("click", onClick);
 
     // Credits elapsed visible time since the last credit, then resets the clock.
@@ -98,16 +117,24 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
     // still gets accurate dwell credit instead of a hard zero.
     let lastCreditAt = Date.now();
     const creditDwell = () => {
+      const now = Date.now();
       if (document.visibilityState !== "visible") {
-        lastCreditAt = Date.now();
+        lastCreditAt = now;
         return;
       }
-      const seconds = (Date.now() - lastCreditAt) / 1000;
+      // Idle past the grace window — the learner is present-but-not-doing-anything (or the tab
+      // was just left open). Don't credit this stretch, and don't let a single later click
+      // backfill it: the clock resets here.
+      if (now - lastActivityRef.current > IDLE_GRACE_MS) {
+        lastCreditAt = now;
+        return;
+      }
+      const seconds = Math.min((now - lastCreditAt) / 1000, IDLE_GRACE_MS / 1000);
+      lastCreditAt = now;
       if (seconds > 0.1) {
         push("dwell", { seconds });
         setActiveSeconds((prev) => prev + seconds);
       }
-      lastCreditAt = Date.now();
     };
     creditDwellRef.current = creditDwell;
 
@@ -134,6 +161,10 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
   };
 
   const reportProgress = (ratio: number) => {
+    // Mode progress (a video/podcast advancing, a panel scrolling into view, a card flipped) is
+    // genuine engagement — keeps dwell accruing through content that's watched/listened to
+    // rather than clicked.
+    lastActivityRef.current = Date.now();
     const clamped = Math.max(0, Math.min(1, ratio));
     setProgressRatio((prev) => (prev === null ? clamped : Math.max(prev, clamped)));
     pushRef.current("progress", { ratio: clamped });
@@ -150,6 +181,7 @@ export function TelemetryProvider({ sessionId, children }: { sessionId: string; 
   };
 
   const reportQuizAnswer = (questionIndex: number, correct: boolean) => {
+    lastActivityRef.current = Date.now();
     pushRef.current("quiz_answer", { question_index: questionIndex, correct });
   };
 

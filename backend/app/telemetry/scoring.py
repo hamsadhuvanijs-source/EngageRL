@@ -45,6 +45,11 @@ PODCAST_WORDS_PER_SECOND = 2.5
 # time reads as an idle/abandoned tab, not engagement, and decays back down instead of capping
 # at max the way a naive ratio-clamp would. The same threshold is used client-side as the trigger
 # for the "still with it?" check-in popup, so the UI nudge and the scoring cliff line up.
+#
+# Note the *lower* end is handled client-side now: the frontend only credits "dwell" seconds
+# while the learner is actually doing something (scroll / key / click / mode progress within the
+# last IDLE_GRACE_MS — see TelemetryProvider). Time with the tab open but the learner idle
+# never reaches this module, so "run out the expected clock by leaving it open" no longer scores.
 DWELL_OVERAGE_TOLERANCE = 2.0
 DWELL_DECAY_RATE = 0.5
 IDLE_DENSITY_THRESHOLD = 0.5
@@ -55,11 +60,31 @@ IDLE_DENSITY_THRESHOLD = 0.5
 PACE_BUMP_FACTOR = 1.2
 MAX_PACE_MULTIPLIER = 3.0
 
-WEIGHT_DWELL = 0.30
-WEIGHT_INTERACTION = 0.20
-WEIGHT_TAB_PENALTY = 0.15
-WEIGHT_COMPLETION = 0.15
-WEIGHT_FEEDBACK = 0.20
+# Weights sum to 1.0. There is deliberately no standalone "tab penalty" term any more — it used
+# to be a one-sided penalty that still handed out its full weight (0.15) to anyone who simply
+# didn't switch tabs, putting a hard floor under otherwise-disengaged sessions. Tab-switching is
+# now a multiplicative penalty on the final score (TAB_SWITCH_* below) so it can only ever pull a
+# score down. Likewise there's no standalone "interaction rate" term — counting raw scroll/click/
+# mouse events against a low bar was trivially maxed by clicking through content without reading
+# it. What matters is *depth*: how much of the content the learner actually engaged with.
+WEIGHT_DWELL = 0.30       # active (client-side idle-filtered) time vs the expected pace
+WEIGHT_DEPTH = 0.35       # fraction of the content the learner genuinely got into
+WEIGHT_COMPLETION = 0.15  # progress reached, discounted if never marked complete
+WEIGHT_FEEDBACK = 0.20    # self-reported enjoyment + reason for any early exit
+
+TAB_SWITCH_PENALTY_PER_SWITCH = 0.07
+TAB_SWITCH_PENALTY_FLOOR = 0.55
+
+# Tapping "I'm done" before this fraction of the content is a real disengagement signal, scored
+# by the stated reason. At/after it, wrapping up is just finishing and carries no penalty. The
+# cutoff matches the frontend's COMPLETION_WARN_THRESHOLD (app/sessions/[id]/page.tsx).
+EARLY_EXIT_PROGRESS_CUTOFF = 0.85
+EARLY_EXIT_REASON_SCORES = {
+    "not_interesting": 0.0,
+    "too_hard": 0.15,
+    "moving_on": 0.35,
+    "ran_out_of_time": 0.5,  # an external constraint, not a verdict on the format
+}
 
 INTERACTION_EVENT_TYPES = {"scroll", "keypress", "mouse_move", "click"}
 
@@ -117,6 +142,27 @@ def raw_progress_ratio(events: list[TelemetryEvent]) -> float | None:
     return _clamp(max(ratios)) if ratios else None
 
 
+# Modes whose view reports progress on *any* genuine engagement (an answer, a card flip, an
+# item revealed, a panel scrolled into view). For these, a session with NO progress telemetry
+# means the learner really did get 0% into the content — not "we can't tell" — so it scores as
+# 0, no time/status fallback.
+#
+# Deliberately excluded: summary and flowchart (one block, nothing discrete to track); and
+# podcast/video, whose progress only fires during media playback — a learner who reads the
+# transcript instead produces none, so those keep the `None` -> fall-back-to-active-dwell path.
+PROGRESS_TRACKED_MODES = {"quiz", "flashcards", "qa", "comic"}
+
+
+def resolve_progress(events: list[TelemetryEvent], mode: str | None) -> float | None:
+    """`raw_progress_ratio`, but a progress-tracked mode (see PROGRESS_TRACKED_MODES) that
+    reported nothing resolves to 0.0 rather than None — for those modes "no progress events"
+    is real data, not missing data."""
+    ratio = raw_progress_ratio(events)
+    if ratio is None and mode in PROGRESS_TRACKED_MODES:
+        return 0.0
+    return ratio
+
+
 def quiz_accuracy(events: list[TelemetryEvent]) -> float | None:
     """Fraction of quiz questions answered correctly, from real per-answer "quiz_answer"
     telemetry (pushed by QuizView as each question is answered) — not a proxy, the actual
@@ -130,35 +176,49 @@ def quiz_accuracy(events: list[TelemetryEvent]) -> float | None:
     return sum(outcomes) / len(outcomes) if outcomes else None
 
 
-def _completion_ratio(events: list[TelemetryEvent], status: str) -> float:
-    """The completion signal as used by the engagement score: `raw_progress_ratio` scaled down
-    for sessions that were never marked complete, or the pre-existing status-only estimate when
-    there's no progress signal at all (some modes, e.g. summary, have no discrete items to track
-    progress through) — 1.0 if the user still finished, 0.5 otherwise."""
-    ratio = raw_progress_ratio(events)
-    if ratio is None:
+def _completion_ratio(progress: float | None, status: str) -> float:
+    """The completion signal as used by the engagement score: the resolved progress ratio scaled
+    down for sessions that were never marked complete, or a status-only estimate when the mode
+    has no progress signal at all (summary, flowchart) — 1.0 if the user still finished, 0.5
+    otherwise."""
+    if progress is None:
         return 1.0 if status == "completed" else 0.5
-    return ratio * (1.0 if status == "completed" else 0.5)
+    return progress * (1.0 if status == "completed" else 0.5)
 
 
-def _feedback_score(events: list[TelemetryEvent]) -> float:
-    """Real self-reported engagement, not inferred — "are you enjoying this?" mid-session/
-    end-session check-ins, plus an implicit negative if the user's stated reason for marking a
-    session complete early was "not interesting". Takes the most recent signal chronologically
-    (a later answer supersedes an earlier one), and stays neutral if the user never answered."""
-    signals: list[tuple[object, bool]] = []
+def _feedback_score(events: list[TelemetryEvent], progress: float | None) -> float:
+    """Combines every self-report signal in the session into one [0, 1] value:
+      - explicit "are you enjoying this?" answers (1.0 = yes, 0.0 = no)
+      - the reason given for ending a session early, when it was ended before
+        EARLY_EXIT_PROGRESS_CUTOFF of the content (see EARLY_EXIT_REASON_SCORES)
+
+    Multiple signals are combined with min(), NOT "most recent wins". The completion flow shows
+    the enjoyment prompt *after* the early-exit-reason prompt, so "most recent" let a reflexive
+    end-of-session 🙂 silently overwrite a genuine "this isn't working for me, I'm leaving at
+    40%". Neutral (0.5) only when there is no signal at all."""
+    reached = progress if progress is not None else 1.0
+    scores: list[float] = []
     for e in events:
         payload = e.payload or {}
         if e.event_type == "enjoyment_feedback" and "enjoying" in payload:
-            signals.append((e.client_ts, bool(payload["enjoying"])))
-        elif e.event_type == "incomplete_reason" and payload.get("reason") == "not_interesting":
-            signals.append((e.client_ts, False))
+            scores.append(1.0 if payload["enjoying"] else 0.0)
+        elif e.event_type == "incomplete_reason":
+            client_ratio = float(payload.get("completion_ratio", 0.0) or 0.0)
+            reason = payload.get("reason")
+            if max(reached, client_ratio) < EARLY_EXIT_PROGRESS_CUTOFF and reason in EARLY_EXIT_REASON_SCORES:
+                scores.append(EARLY_EXIT_REASON_SCORES[reason])
 
-    if not signals:
-        return NEUTRAL_FEEDBACK_SCORE
+    return min(scores) if scores else NEUTRAL_FEEDBACK_SCORE
 
-    signals.sort(key=lambda s: s[0])
-    return 1.0 if signals[-1][1] else 0.0
+
+def _content_depth(progress: float | None, dwell_ratio: float) -> float:
+    """How much of the content the learner actually got into — the term that separates "read
+    it" from "clicked through it". Uses real per-mode progress (quiz questions answered,
+    flashcards *flipped*, Q&A items *revealed*, video/podcast seconds played, comic panels
+    scrolled past). Only when a mode has no discrete progress signal at all (summary, flowchart)
+    does it fall back to the activity-gated dwell ratio — the only "engaged with a single block
+    of prose/diagram" proxy available."""
+    return progress if progress is not None else dwell_ratio
 
 
 def _content_char_count(content: GeneratedContent | None) -> int:
@@ -267,19 +327,20 @@ def compute_engagement_score(db: Session, session: LearningSession) -> float:
 
     expected_interactions = max(char_count / CHARS_PER_EXPECTED_INTERACTION, MIN_EXPECTED_INTERACTIONS)
 
-    tab_penalty = _clamp(1 - 0.1 * tab_switch_count)
+    progress = resolve_progress(events, content.mode if content else None)
     dwell_ratio = _dwell_ratio(
         active_dwell_seconds, expected_seconds, overage_threshold_seconds, interaction_events, expected_interactions
     )
-    interaction_rate = _clamp(interaction_events / expected_interactions)
-    completion_bonus = _completion_ratio(events, session.status)
-    feedback_score = _feedback_score(events)
+    depth = _content_depth(progress, dwell_ratio)
+    completion_bonus = _completion_ratio(progress, session.status)
+    feedback_score = _feedback_score(events, progress)
 
     score = (
         WEIGHT_DWELL * dwell_ratio
-        + WEIGHT_INTERACTION * interaction_rate
-        + WEIGHT_TAB_PENALTY * tab_penalty
+        + WEIGHT_DEPTH * depth
         + WEIGHT_COMPLETION * completion_bonus
         + WEIGHT_FEEDBACK * feedback_score
     )
-    return round(_clamp(score), 4)
+    # Tab-switching away mid-session can only ever reduce the score — never a free component.
+    tab_multiplier = max(TAB_SWITCH_PENALTY_FLOOR, 1.0 - TAB_SWITCH_PENALTY_PER_SWITCH * tab_switch_count)
+    return round(_clamp(score * tab_multiplier), 4)

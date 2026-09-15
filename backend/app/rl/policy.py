@@ -62,6 +62,21 @@ def active_policy(db: Session, user_id: str) -> str:
     return POLICY_COLD_START if completed_session_count(db, user_id) < threshold else POLICY_Q_LEARNING
 
 
+def _bandit_prior_means(db: Session, user_id: str) -> dict[str, float]:
+    """Per-mode posterior mean from the legacy cold-start bandit (app/rl/bandit.py) — only 8
+    arms total rather than ~2,900 states x 8 actions, so it's a far better-sampled prior than any
+    one Q-table cell. Kept updated regardless of active policy (see record_outcome below), so
+    it's always available as the shrinkage prior qlearning.blended_q_values needs, even deep into
+    the Q-learning regime."""
+    means: dict[str, float] = {}
+    for mode in IMPLEMENTED_MODES:
+        state = bandit.get_or_create_state(db, user_id, mode)
+        alpha = float(state.params_json.get("alpha", 1.0))
+        beta = float(state.params_json.get("beta", 1.0))
+        means[mode] = alpha / (alpha + beta)
+    return means
+
+
 def choose_action(db: Session, user: User, chat: Chat) -> ActionDecision:
     """Advisory action selection — drives the "Suggested for you" UI and the alternatives
     offered by the "still with it?" check-in. Not binding: the learner can (and often will) pick
@@ -75,11 +90,23 @@ def choose_action(db: Session, user: User, chat: Chat) -> ActionDecision:
         logger.info("policy=cold_start user=%s state=%s action=%s", user.id, state.key, mode)
         return ActionDecision(mode=mode, policy=policy, epsilon=None, state=state, action_scores=scores)
 
-    mode, epsilon, q_values = qlearning.select_action(db, user.id, state.key, IMPLEMENTED_MODES)
+    # Raw per-state Q-values are chosen from directly only in tests/inspection (qlearning.
+    # select_action). Live selection goes through blended_q_values instead: the discretized state
+    # space is large relative to how many sessions one real user generates (see app/rl/state.py's
+    # cardinality note), so most (state, action) cells only ever have a single sample — acting on
+    # that alone is noisier than the data supports. blended_q_values shrinks each action's
+    # state-specific estimate toward the much-better-sampled cold-start bandit's per-mode
+    # posterior mean, weighted by how many times this exact (state, action) pair has actually
+    # been observed (see its docstring) — already on the reward-like [0, 1] scale, so it doubles
+    # as action_scores for display with no separate conversion needed.
+    epsilon = qlearning.current_epsilon(db, user.id)
+    prior_by_action = _bandit_prior_means(db, user.id)
+    blended_scores = qlearning.blended_q_values(db, user.id, state.key, prior_by_action, IMPLEMENTED_MODES)
+    mode = qlearning.epsilon_greedy_pick(blended_scores, epsilon, IMPLEMENTED_MODES)
     logger.info(
         "policy=q_learning user=%s state=%s action=%s epsilon=%.3f", user.id, state.key, mode, epsilon
     )
-    return ActionDecision(mode=mode, policy=policy, epsilon=epsilon, state=state, action_scores=q_values)
+    return ActionDecision(mode=mode, policy=policy, epsilon=epsilon, state=state, action_scores=blended_scores)
 
 
 def snapshot_decision(db: Session, user: User, chat: Chat, mode: str) -> dict:

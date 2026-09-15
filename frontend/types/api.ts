@@ -1,3 +1,15 @@
+export interface UserOut {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: UserOut;
+}
+
 export type SourceType = "pdf" | "txt" | "youtube" | "website" | "pasted_text";
 export type Mode = "summary" | "quiz" | "flashcards" | "qa" | "flowchart" | "podcast" | "comic" | "video";
 

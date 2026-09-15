@@ -1,21 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useTelemetry } from "@/components/telemetry/TelemetryProvider";
 import { loadContentState, saveContentState } from "@/lib/persistence";
 import type { QAContent } from "@/types/api";
 
 const STATE_KEY = "openIndices";
+const REVEALED_STATE_KEY = "revealed";
 
 export function QAView({ content, contentId }: { content: QAContent; contentId: string }) {
   const { flushNow, reportProgress } = useTelemetry();
   const [openIndices, setOpenIndices] = useState<number[]>(
     () => loadContentState<number[]>(contentId, STATE_KEY) ?? []
   );
+  // Progress is "answers ever revealed", monotonic — collapsing an item back doesn't take the
+  // credit away, but nor does re-collapsing everything drop you to 0%.
+  const revealedRef = useRef<Set<number>>(
+    new Set(loadContentState<number[]>(contentId, REVEALED_STATE_KEY) ?? loadContentState<number[]>(contentId, STATE_KEY) ?? [])
+  );
+
+  const reportRevealProgress = () => {
+    reportProgress(revealedRef.current.size / content.items.length);
+  };
 
   useEffect(() => {
-    reportProgress(openIndices.length / content.items.length);
+    reportRevealProgress();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -23,9 +33,13 @@ export function QAView({ content, contentId }: { content: QAContent; contentId: 
     setOpenIndices((prev) => {
       const next = prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i];
       saveContentState(contentId, STATE_KEY, next);
-      reportProgress(next.length / content.items.length);
       return next;
     });
+    if (!revealedRef.current.has(i)) {
+      revealedRef.current.add(i);
+      saveContentState(contentId, REVEALED_STATE_KEY, [...revealedRef.current]);
+      reportRevealProgress();
+    }
     void flushNow();
   };
 

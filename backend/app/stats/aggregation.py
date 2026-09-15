@@ -9,7 +9,7 @@ from app.models.material_source import MaterialSource
 from app.models.q_state import QState
 from app.models.telemetry_event import TelemetryEvent
 from app.models.user import User
-from app.rl import bandit
+from app.rl import bandit, qlearning
 from app.rl.actions import IMPLEMENTED_MODES
 from app.rl.policy import active_policy, completed_session_count
 from app.schemas.chat import ChatOut
@@ -35,6 +35,7 @@ def _q_value_averages(db: Session, user_id: str) -> dict[str, tuple[float, int]]
 
 
 def compute_stats(db: Session, user: User) -> StatsOut:
+    settings = get_settings()
     chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id).scalar() or 0
 
     source_count = (
@@ -80,7 +81,17 @@ def compute_stats(db: Session, user: User) -> StatsOut:
         thompson_mean = alpha / (alpha + beta)
 
         q_value_avg, visit_count = q_averages.get(mode, (None, 0))
-        preference = _clamp01(q_value_avg) if q_value_avg is not None else thompson_mean
+        # q_value_avg is a raw Q-value average across every state this mode's been used in —
+        # converted onto the reward-like [0, 1] scale before use (see qlearning.q_to_reward_scale;
+        # otherwise a well-visited action's discounted Q-value quickly exceeds 1 and every decent
+        # mode ends up clamped to a flat 100% bar) — then shrunk toward the bandit's per-mode
+        # posterior mean by the same visit-count-weighted blend action selection uses (see
+        # qlearning.blended_q_values), rather than an all-or-nothing switch between the two. With
+        # visit_count still low for most real users this keeps the bar close to the bandit's
+        # better-sampled estimate instead of swinging on a couple of state-specific samples.
+        state_estimate = qlearning.q_to_reward_scale(q_value_avg) if q_value_avg is not None else 0.0
+        shrinkage_k = settings.rl_shrinkage_pseudo_count
+        preference = _clamp01((visit_count * state_estimate + shrinkage_k * thompson_mean) / (visit_count + shrinkage_k))
 
         mode_preference[mode] = ModePreference(
             alpha=alpha,
@@ -95,7 +106,6 @@ def compute_stats(db: Session, user: User) -> StatsOut:
         db.query(Chat).filter(Chat.user_id == user.id).order_by(Chat.updated_at.desc()).limit(RECENT_CHATS_LIMIT).all()
     )
 
-    settings = get_settings()
     rl_policy = RLPolicySummary(
         active_policy=active_policy(db, user.id),
         completed_sessions=completed_session_count(db, user.id),

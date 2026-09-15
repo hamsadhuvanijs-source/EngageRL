@@ -1,4 +1,4 @@
-import { API_BASE, postEvents } from "@/lib/api";
+import { API_BASE, authHeaders, postEvents } from "@/lib/api";
 import type { TelemetryEvent } from "@/types/api";
 
 const FLUSH_INTERVAL_MS = 5000;
@@ -38,15 +38,17 @@ export class TelemetryCollector {
     }
   }
 
-  /** Used on unmount/unload where an async fetch may be cancelled by the browser. */
+  /** Used on unmount/unload. `keepalive` lets the request outlive the page (like sendBeacon)
+   * while still carrying the Authorization header the endpoint now requires — sendBeacon
+   * can't set headers. Telemetry batches are far under keepalive's 64KB body limit. */
   private flushSync() {
     if (this.buffer.length === 0) return;
     const events = this.buffer.splice(0, this.buffer.length);
-    if (typeof navigator !== "undefined" && navigator.sendBeacon) {
-      const blob = new Blob([JSON.stringify({ events })], { type: "application/json" });
-      navigator.sendBeacon(`${API_BASE}/sessions/${this.sessionId}/events`, blob);
-    } else {
-      void postEvents(this.sessionId, events).catch(() => {});
-    }
+    void fetch(`${API_BASE}/sessions/${this.sessionId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ events }),
+      keepalive: true,
+    }).catch(() => {});
   }
 }

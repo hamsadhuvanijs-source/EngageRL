@@ -1,4 +1,6 @@
+import { clearToken, getToken } from "@/lib/auth";
 import type {
+  AuthResponse,
   ChatDetailOut,
   ChatOut,
   GeneratedContentOut,
@@ -13,13 +15,32 @@ import type {
   TelemetryEvent,
   TutorMessageOut,
   TutorReplyOut,
+  UserOut,
 } from "@/types/api";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+/** Authorization header for the current token, or {} when logged out. Exported so the
+ * telemetry collector's keepalive fetch can reuse it. */
+export function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers ?? {}) },
+  });
   if (!res.ok) {
+    // An expired/invalid token on a normal call — drop it and bounce to login. Auth
+    // endpoints are exempt so a wrong password surfaces as an ApiError for the form.
+    if (res.status === 401 && !path.startsWith("/auth/") && getToken()) {
+      clearToken();
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.detail ?? res.statusText);
   }
@@ -33,6 +54,32 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// Auth
+
+export function register(email: string, password: string, displayName?: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, display_name: displayName || null }),
+  });
+}
+
+export function login(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
+}
+
+export function getMe(): Promise<UserOut> {
+  return request<UserOut>("/auth/me");
 }
 
 // Chats

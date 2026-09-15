@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.deps import get_current_user, require_owned_chat
 from app.generation.text_combine import combine_source_text
-from app.models.chat import Chat
 from app.models.material_source import MaterialSource
 from app.models.tutor_message import TutorMessage
+from app.models.user import User
 from app.schemas.tutor import TutorMessageIn, TutorMessageOut, TutorReplyOut
 from app.tutor.ollama_client import OllamaUnavailableError
 from app.tutor.ollama_client import chat as ollama_chat
@@ -24,16 +25,23 @@ MATERIAL_CHAR_BUDGET = 6000
 
 
 @router.get("/chats/{chat_id}/tutor/messages", response_model=list[TutorMessageOut])
-def list_tutor_messages(chat_id: str, db: Session = Depends(get_db)) -> list[TutorMessage]:
-    _get_chat(db, chat_id)
+def list_tutor_messages(
+    chat_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> list[TutorMessage]:
+    require_owned_chat(db, chat_id, user)
     return (
         db.query(TutorMessage).filter(TutorMessage.chat_id == chat_id).order_by(TutorMessage.created_at).all()
     )
 
 
 @router.post("/chats/{chat_id}/tutor/messages", response_model=TutorReplyOut)
-def send_tutor_message(chat_id: str, body: TutorMessageIn, db: Session = Depends(get_db)) -> TutorReplyOut:
-    chat = _get_chat(db, chat_id)
+def send_tutor_message(
+    chat_id: str,
+    body: TutorMessageIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TutorReplyOut:
+    chat = require_owned_chat(db, chat_id, user)
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="content must not be empty")
 
@@ -69,10 +77,3 @@ def send_tutor_message(chat_id: str, body: TutorMessageIn, db: Session = Depends
     db.refresh(assistant_message)
 
     return TutorReplyOut(user_message=user_message, assistant_message=assistant_message)
-
-
-def _get_chat(db: Session, chat_id: str) -> Chat:
-    chat = db.get(Chat, chat_id)
-    if chat is None:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    return chat

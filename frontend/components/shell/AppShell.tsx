@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 
-import { Sidebar } from "@/components/shell/Sidebar";
+import { AuthGate } from "@/components/auth/AuthGate";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="app-shell">
-      <Sidebar />
-      <div className="app-main">{children}</div>
-    </div>
+    <AuthProvider>
+      <AuthGate>{children}</AuthGate>
+    </AuthProvider>
   );
 }

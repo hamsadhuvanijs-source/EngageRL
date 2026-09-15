@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal, get_db
+from app.deps import get_current_user, require_owned_chat
 from app.generation.base import GeneratorInterface
 from app.generation.comic import ComicGenerator
 from app.generation.flashcards import FlashcardsGenerator
@@ -18,6 +19,7 @@ from app.generation.video import VideoGenerator
 from app.models.chat import Chat
 from app.models.generated_content import GeneratedContent
 from app.models.material_source import MaterialSource
+from app.models.user import User
 from app.schemas.generated_content import GenerateRequest, GeneratedContentOut
 
 router = APIRouter(tags=["generation"])
@@ -37,10 +39,13 @@ _MODEL_USED_SUFFIX = {"comic": "+pollinations", "video": "+pollinations+edge-tts
 
 
 @router.post("/chats/{chat_id}/generate", response_model=GeneratedContentOut)
-def generate_content(chat_id: str, body: GenerateRequest, db: Session = Depends(get_db)) -> GeneratedContent:
-    chat = db.get(Chat, chat_id)
-    if chat is None:
-        raise HTTPException(status_code=404, detail="Chat not found")
+def generate_content(
+    chat_id: str,
+    body: GenerateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GeneratedContent:
+    chat = require_owned_chat(db, chat_id, user)
 
     generator = _GENERATORS.get(body.mode)
     if generator is None:
@@ -84,10 +89,13 @@ def generate_content(chat_id: str, body: GenerateRequest, db: Session = Depends(
 
 
 @router.get("/generated-content/{content_id}", response_model=GeneratedContentOut)
-def get_generated_content(content_id: str, db: Session = Depends(get_db)) -> GeneratedContent:
+def get_generated_content(
+    content_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> GeneratedContent:
     content = db.get(GeneratedContent, content_id)
     if content is None:
         raise HTTPException(status_code=404, detail="Generated content not found")
+    require_owned_chat(db, content.chat_id, user)
     return content
 
 

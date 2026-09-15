@@ -1,11 +1,13 @@
 """Reward and episode-termination logic for the Q-learning MDP.
 
 The reward is deliberately built *on top of* the existing engagement score
-(`telemetry.scoring.compute_engagement_score`) rather than replacing it — that score already
-resists the "just spend more time on the page" failure mode (dwell time is capped at full credit
-once it matches the expected pace, and decays past a grace threshold unless interaction density
-holds up; see telemetry/scoring.py::_dwell_ratio). Two more terms are layered on to make it a
-genuine *learning* reward rather than a pure engagement reward:
+(`telemetry.scoring.compute_engagement_score`) rather than replacing it. That score is built to
+resist the obvious gaming routes: dwell only accrues while the learner is actually active
+(idle-filtered client-side) and is capped once it matches the expected pace; the largest term is
+*depth* — how much of the content was genuinely engaged with (answers given, cards flipped,
+media played), not how many clicks were logged; and tab-switching only ever subtracts. Two more
+terms are layered on here to make it a genuine *learning* reward rather than a pure engagement
+reward:
 
   - a quiz-accuracy component, where available, so a session that felt engaging but was
     answered mostly wrong doesn't score as well as one with real comprehension
@@ -20,7 +22,7 @@ from app.models.generated_content import GeneratedContent
 from app.models.learning_session import LearningSession
 from app.models.telemetry_event import TelemetryEvent
 from app.rl.state import STATE_HISTORY_WINDOW, recent_completed_sessions
-from app.telemetry.scoring import compute_engagement_score, quiz_accuracy, raw_progress_ratio
+from app.telemetry.scoring import compute_engagement_score, quiz_accuracy, resolve_progress
 
 WEIGHT_BASE_ENGAGEMENT = 0.7
 WEIGHT_QUIZ_ACCURACY = 0.2
@@ -98,11 +100,11 @@ def is_topic_mastered(
     if engagement_score < MASTERY_ENGAGEMENT_THRESHOLD:
         return False
 
-    progress = raw_progress_ratio(events)
+    content = db.get(GeneratedContent, session.generated_content_id)
+    progress = resolve_progress(events, content.mode if content else None)
     if progress is not None and progress < MASTERY_PROGRESS_THRESHOLD:
         return False
 
-    content = db.get(GeneratedContent, session.generated_content_id)
     if content and content.mode == "quiz":
         accuracy = quiz_accuracy(events)
         if accuracy is not None and accuracy < MASTERY_ACCURACY_THRESHOLD:

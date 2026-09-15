@@ -122,6 +122,18 @@ def test_select_action_never_crashes_on_a_brand_new_unseen_state(db):
     assert all(v == 0.0 for v in q_values.values())
 
 
+def test_q_to_reward_scale_converts_discounted_q_back_onto_the_reward_scale(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rl_gamma", 0.9)
+
+    # A (state, action) pair repeatedly revisited with a constant reward r converges toward the
+    # fixed point Q* = r / (1 - gamma) — e.g. reward=0.5 -> Q*=5.0 under gamma=0.9. Displaying
+    # that raw Q-value as a clamped 0-1 percentage would saturate at 100% for almost any decent
+    # action; q_to_reward_scale must invert the discounting back to ~the original reward.
+    steady_state_q = 0.5 / (1 - 0.9)
+    assert qlearning.q_to_reward_scale(steady_state_q) == 0.5
+
+
 def test_epsilon_decays_with_q_learning_experience_and_floors_at_minimum(db):
     user = make_user(db)
     settings = get_settings()

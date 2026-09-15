@@ -24,6 +24,24 @@ from app.rl.actions import IMPLEMENTED_MODES
 logger = logging.getLogger("app.rl.qlearning")
 
 
+def q_to_reward_scale(q_value: float) -> float:
+    """Converts a raw Q-value onto the same ~[0, 1] scale as the rewards it's built from, for
+    display purposes only (action *selection* is scale-invariant — comparing raw Q(s, ·) picks
+    the same best action either way, so select_action/update_q never need this).
+
+    Q(s, a) is a *discounted sum of future rewards*, not a single-step quantity — for a
+    (state, action) pair that keeps getting revisited with a roughly constant reward r, it
+    converges toward the fixed point r / (1 - gamma), not toward r itself. With the default
+    gamma=0.9 that's up to 10x the reward scale, so displaying a raw Q-value as a clamped 0-1
+    "confidence"/"preference" percentage saturates at 100% almost immediately and stops
+    reflecting real differences in how well an action is doing. Multiplying by (1 - gamma)
+    inverts that geometric series back to the steady-state average per-step reward it
+    represents, which is the same [0, 1]-ish scale as the reward and the cold-start Thompson
+    mean it's displayed alongside."""
+    settings = get_settings()
+    return q_value * (1.0 - settings.rl_gamma)
+
+
 def get_q_value(db: Session, user_id: str, state_key: str, action: str) -> float:
     """Zero-initialized for any (state, action) pair never seen before — the standard tabular
     Q-learning default, and how new users / newly-encountered states are handled without any
@@ -55,28 +73,79 @@ def current_epsilon(db: Session, user_id: str) -> float:
     return max(settings.rl_epsilon_min, epsilon)
 
 
+def epsilon_greedy_pick(values: dict[str, float], epsilon: float, actions: tuple[str, ...]) -> str:
+    """The explore/exploit decision given any per-action value mapping — factored out of
+    select_action so policy.py's confidence-shrunk selection (see blended_q_values) can go
+    through the exact same random-explore-or-argmax-with-random-tie-break behavior over its own
+    blended values, instead of duplicating it. Ties for the greedy action are broken randomly
+    rather than always favoring the first action in `actions`, so an untouched, all-equal value
+    mapping explores uniformly instead of always picking the same default action."""
+    if random.random() < epsilon:
+        return random.choice(actions)
+    best_value = max(values.values())
+    best_actions = [a for a, v in values.items() if v == best_value]
+    return random.choice(best_actions)
+
+
 def select_action(
     db: Session, user_id: str, state_key: str, actions: tuple[str, ...] = IMPLEMENTED_MODES
 ) -> tuple[str, float, dict[str, float]]:
-    """Epsilon-greedy selection over Q(s, ·). Returns (chosen_action, epsilon_used, q_values).
-    Ties for the greedy action are broken randomly rather than always favoring the first action
-    in `actions`, so an untouched, all-zero Q(s, ·) explores uniformly instead of always picking
-    the same default action."""
+    """Epsilon-greedy selection over raw Q(s, ·). Returns (chosen_action, epsilon_used, q_values).
+    Kept as a direct, self-contained entry point over the raw table (e.g. for tests/inspection);
+    policy.py's live action selection goes through blended_q_values + epsilon_greedy_pick instead
+    — see that function's docstring for why."""
     epsilon = current_epsilon(db, user_id)
     q_values = get_q_values(db, user_id, state_key, actions)
-
-    if random.random() < epsilon:
-        action = random.choice(actions)
-        logger.debug("q_learning explore: state=%s action=%s epsilon=%.3f", state_key, action, epsilon)
-        return action, epsilon, q_values
-
-    best_value = max(q_values.values())
-    best_actions = [a for a, v in q_values.items() if v == best_value]
-    action = random.choice(best_actions)
-    logger.debug(
-        "q_learning exploit: state=%s action=%s epsilon=%.3f q=%.4f", state_key, action, epsilon, best_value
-    )
+    action = epsilon_greedy_pick(q_values, epsilon, actions)
+    logger.debug("q_learning select: state=%s action=%s epsilon=%.3f q=%s", state_key, action, epsilon, q_values)
     return action, epsilon, q_values
+
+
+def blended_q_values(
+    db: Session,
+    user_id: str,
+    state_key: str,
+    prior_by_action: dict[str, float],
+    actions: tuple[str, ...] = IMPLEMENTED_MODES,
+    pseudo_count: float | None = None,
+) -> dict[str, float]:
+    """Confidence-shrunk Q(s, ·), already on the reward-like [0, 1] scale (see q_to_reward_scale)
+    rather than raw Q — this is what actual action selection and display should use, not the raw
+    per-state table directly.
+
+    The per-state Q-table is enormous relative to how many sessions one real user generates
+    (roughly 3*3*3*4*9*3 = 2916 states x 8 actions — see app/rl/state.py's cardinality note), so
+    the overwhelming majority of (state, action) cells only ever get a single sample early on.
+    Trusting that single sample outright makes both the choice of action and the displayed
+    confidence far noisier than the data actually supports — an all-zero Q for a never-tried
+    action in this exact state reads as "known bad" when it's really "no evidence yet", and a
+    single lucky/unlucky session can look like a confident preference.
+
+    Shrinks each action's state-specific estimate toward `prior_by_action[action]` — meant to be
+    the cold-start bandit's per-mode posterior mean (app/rl/bandit.py), which pools evidence
+    across every state that mode has ever been used in and so is far better-sampled than any one
+    state cell — weighted by how many times this exact (state, action) pair has actually been
+    observed:
+
+        blended(s, a) = (n * q_to_reward_scale(raw_q(s, a)) + k * prior(a)) / (n + k)
+
+    n=0 (never visited in this exact state) collapses to the prior outright — a meaningfully
+    better default than zero-init, since "untried here" isn't evidence of being bad, just absence
+    of state-specific evidence. As n grows, the state-specific estimate takes back over — same
+    spirit as update_q's hybrid learning rate (see its docstring)."""
+    settings = get_settings()
+    k = pseudo_count if pseudo_count is not None else settings.rl_shrinkage_pseudo_count
+    rows = {
+        row.action: (row.q_value, row.update_count)
+        for row in db.query(QState).filter_by(user_id=user_id, state_key=state_key).all()
+    }
+    blended: dict[str, float] = {}
+    for action in actions:
+        raw_q, n = rows.get(action, (0.0, 0))
+        state_estimate = q_to_reward_scale(raw_q)
+        prior = prior_by_action.get(action, 0.5)
+        blended[action] = (n * state_estimate + k * prior) / (n + k)
+    return blended
 
 
 def update_q(
